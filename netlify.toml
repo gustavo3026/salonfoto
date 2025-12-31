@@ -1,0 +1,13 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[dev]
+  command = "npm run dev"
+  port = 5173
+
+# SPA Fallback for React (Redirect all traffic to index.html)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
