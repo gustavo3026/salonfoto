@@ -1,4 +1,4 @@
-import { Download, Save, ChevronRight } from 'lucide-react';
+import { Download, ChevronRight } from 'lucide-react';
 import { useStudio } from '../../context/StudioContext';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';

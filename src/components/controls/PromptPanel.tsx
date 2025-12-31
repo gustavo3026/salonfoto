@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useStudio } from '../../context/StudioContext';
 import { processImageWithGemini } from '../../services/api';
-import { Zap, Sun, Palette, Cloud, Scissors, Contrast, RotateCcw } from 'lucide-react';
+import { Zap, Sun, Palette, Cloud, Scissors, Contrast } from 'lucide-react';
 
 export function PromptPanel() {
     const { images, selectedId, updateImage, setIsProcessing, editorMode, brushTool, setBrushTool, brushSize, setBrushSize } = useStudio();
