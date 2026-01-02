@@ -27,7 +27,7 @@ class BatchBGEngine:
             raise ValueError("Could not decode image")
 
         # Resize if too large (protect memory)
-        max_dim = 1024
+        max_dim = 800
         h, w = img.shape[:2]
         if max(h, w) > max_dim:
             scale = max_dim / max(h, w)
