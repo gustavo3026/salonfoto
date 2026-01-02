@@ -7,8 +7,8 @@ import io
 class BatchBGEngine:
     def __init__(self):
         print("Initializing BatchBG Engine (rembg)...")
-        # 'isnet-general-use' is a SOTA model included in rembg
-        self.session = new_session("isnet-general-use")
+        # 'u2netp' is a lightweight model suitable for free tier memory limits
+        self.session = new_session("u2netp")
         print("Model session initialized.")
 
     def process_image(self, image_bytes, task="REMOVE_BG", instruction=None):
