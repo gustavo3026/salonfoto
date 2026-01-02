@@ -6,15 +6,19 @@ import io
 
 class BatchBGEngine:
     def __init__(self):
-        print("Initializing BatchBG Engine (rembg)...")
-        # 'u2netp' is a lightweight model suitable for free tier memory limits
-        self.session = new_session("u2netp")
-        print("Model session initialized.")
+        print("Initializing BatchBG Engine...")
+        self.session = None
+
+    def _get_session(self):
+        if self.session is None:
+            print("Lazy loading 'u2netp' model...")
+            self.session = new_session("u2netp")
+        return self.session
 
     def process_image(self, image_bytes, task="REMOVE_BG", instruction=None):
         print(f"[Engine] Processing task: '{task}' with instruction: '{instruction}'")
         
-        # Decode input for edits, but keep bytes for REMOVE_BG if possible
+        # Decode input
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
         
@@ -22,8 +26,21 @@ class BatchBGEngine:
             print("[Engine] Error: Could not decode image")
             raise ValueError("Could not decode image")
 
+        # Resize if too large (protect memory)
+        max_dim = 1024
+        h, w = img.shape[:2]
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            new_w, new_h = int(w * scale), int(h * scale)
+            print(f"[Engine] Resizing input from {w}x{h} to {new_w}x{new_h} for memory safety")
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            # Update image_bytes for remove_background
+            success, encoded = cv2.imencode('.png', img)
+            if success:
+                image_bytes = encoded.tobytes()
+
         if task == "REMOVE_BG":
-            # Pass original bytes for robust handling
+            # Pass (possibly resized) bytes
             return self.remove_background(image_bytes, is_bytes=True)
             
         elif task == "EDIT":
@@ -51,7 +68,7 @@ class BatchBGEngine:
             input_bytes = encoded.tobytes()
         
         try:
-            output_bytes = remove(input_bytes, session=self.session)
+            output_bytes = remove(input_bytes, session=self._get_session())
             print("[Engine] rembg Inference complete.")
         except Exception as e:
             print(f"[Engine] Error during rembg inference: {e}")
