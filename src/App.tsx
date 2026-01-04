@@ -26,10 +26,13 @@ function MainView() {
   );
 }
 
+import { LogConsole } from './components/common/LogConsole';
+
 function App() {
   return (
     <StudioProvider>
       <MainView />
+      <LogConsole />
     </StudioProvider>
   );
 }
