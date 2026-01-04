@@ -2,8 +2,12 @@
 export type StudioTask = 'REMOVE_BG' | 'EDIT';
 
 import { logger } from './logger';
-import removeBackground from "@imgly/background-removal";
+import * as imgly from "@imgly/background-removal";
 import type { Config } from "@imgly/background-removal";
+
+// Robustly get the function (handles Default export vs Named export vs CommonJS)
+// @ts-ignore
+const removeBackground = (imgly.default as any) || (imgly.removeBackground as any) || (imgly as any);
 
 // Helper to load image
 const loadImage = (src: string): Promise<HTMLImageElement> => {
