@@ -30,10 +30,15 @@ import { LogConsole } from './components/common/LogConsole';
 
 function App() {
   return (
-    <StudioProvider>
-      <MainView />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div style={{ position: 'fixed', top: 0, left: 0, padding: 4, background: 'red', color: 'white', zIndex: 999999, fontSize: 10 }}>
+        VERSION: v2 (Client-Side) - DEBUG
+      </div>
+      <StudioProvider>
+        <MainView />
+      </StudioProvider>
       <LogConsole />
-    </StudioProvider>
+    </div>
   );
 }
 
