@@ -7,6 +7,12 @@
   port = 5173
 
 # SPA Fallback for React (Redirect all traffic to index.html)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

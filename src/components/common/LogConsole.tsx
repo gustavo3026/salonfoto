@@ -78,7 +78,7 @@ export function LogConsole() {
             borderTop: '1px solid #374151',
             display: 'flex',
             flexDirection: 'column',
-            zIndex: 9999,
+            zIndex: 99999,
             fontFamily: 'monospace'
         }}>
             {/* Header */}
