@@ -1,10 +1,8 @@
-import { StudioTask } from './api'; // Self-import for type if needed, but actually StudioTask is defined here usually.
-// Wait, the original file defined StudioTask at the top. I should preserve that.
-
+// Define the type locally as originally intended
 export type StudioTask = 'REMOVE_BG' | 'EDIT';
 
 import { logger } from './logger';
-import removeBackground from "@imgly/background-removal";
+import removeBackground, { Config } from "@imgly/background-removal";
 
 // Helper to load image
 const loadImage = (src: string): Promise<HTMLImageElement> => {
@@ -45,7 +43,6 @@ const applyCanvasFilter = async (base64: string, filter: string): Promise<string
 };
 
 export async function processImageWithGemini(
-    // apiKey: string, // Kept for interface compatibility, but unused for local
     imageBase64: string,
     task: StudioTask,
     userInstruction?: string
@@ -57,16 +54,18 @@ export async function processImageWithGemini(
             logger.log("Cargando modelo AI local (@imgly)... Esto puede tardar la primera vez.");
             const start = Date.now();
 
-            // Config: Download assets from unpkg to avoid Vite proxy issues locally
-            const blob = await removeBackground(imageBase64, {
-                progress: (key, current, total) => {
+            // Config object for progress tracking
+            const config: Config = {
+                progress: (key: string, current: number, total: number) => {
                     const percent = Math.round((current / total) * 100);
                     // Only log significant updates to avoid spam
                     if (percent % 20 === 0) {
                         logger.log(`Descargando AI: ${key} ${percent}%`);
                     }
                 }
-            });
+            };
+
+            const blob = await removeBackground(imageBase64, config);
 
             const duration = ((Date.now() - start) / 1000).toFixed(1);
             logger.log(`¡Fondo eliminado localmente en ${duration}s!`);

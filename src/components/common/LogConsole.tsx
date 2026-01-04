@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Terminal, XCircle, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { Terminal, ChevronDown, Trash2 } from 'lucide-react';
 
 interface LogMessage {
     type: 'info' | 'error';
