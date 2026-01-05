@@ -26,9 +26,14 @@ export function Dashboard() {
             if (!img) return;
 
             try {
-                updateImage(img.id, { status: 'processing' });
-                const result = await processImageWithGemini(img.original, 'REMOVE_BG');
-                updateImage(img.id, { status: 'done', processed: result });
+                updateImage(img.id, { status: 'processing', progress: 0 });
+                const result = await processImageWithGemini(
+                    img.original,
+                    'REMOVE_BG',
+                    undefined,
+                    (p) => updateImage(img.id, { progress: p })
+                );
+                updateImage(img.id, { status: 'done', processed: result, progress: 100 });
             } catch (err) {
                 console.error("Batch error", err);
                 updateImage(img.id, { status: 'error' });
@@ -286,8 +291,8 @@ export function Dashboard() {
                                     </div>
                                 )}
                                 {img.status === 'processing' && (
-                                    <div className="animate-spin" style={{ color: 'var(--color-primary)' }}>
-                                        <Loader2 size={20} />
+                                    <div style={{ color: 'var(--color-primary)', fontWeight: 'bold', fontSize: '0.9rem', background: 'rgba(255,255,255,0.9)', padding: '2px 6px', borderRadius: '4px' }}>
+                                        {img.progress || 0}%
                                     </div>
                                 )}
                             </div>

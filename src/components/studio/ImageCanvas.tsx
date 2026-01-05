@@ -351,7 +351,7 @@ export function ImageCanvas() {
                 }}>
                     <div style={{ background: 'white', padding: '1rem 2rem', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Loader2 className="animate-spin" size={20} color="var(--color-primary)" />
-                        <span style={{ fontWeight: 600 }}>Procesando...</span>
+                        <span style={{ fontWeight: 600 }}>Procesando {activeImage?.progress || 0}%...</span>
                     </div>
                 </div>
             )}

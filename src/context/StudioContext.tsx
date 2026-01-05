@@ -12,6 +12,7 @@ export interface StudioImage {
     processed: string | null;
     status: 'idle' | 'processing' | 'done' | 'error';
     transform?: ImageTransform;
+    progress?: number;
 }
 
 export type ViewMode = 'DASHBOARD' | 'EDITOR';
@@ -58,7 +59,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             original: img,
             processed: null,
             status: 'idle',
-            transform: { x: 0, y: 0, scale: 1 }
+            transform: { x: 0, y: 0, scale: 1 },
+            progress: 0
         };
         setImages(prev => [...prev, newImage]);
         // Stay in dashboard when adding

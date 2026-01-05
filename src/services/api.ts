@@ -50,7 +50,8 @@ const applyCanvasFilter = async (base64: string, filter: string): Promise<string
 export async function processImageWithGemini(
     imageBase64: string,
     task: StudioTask,
-    userInstruction?: string
+    userInstruction?: string,
+    onProgress?: (percent: number) => void
 ): Promise<string> {
     logger.log(`[CLIENT-SIDE] Iniciando proceso local: ${task}`, { instruction: userInstruction });
 
@@ -63,30 +64,51 @@ export async function processImageWithGemini(
             const config: Config = {
                 model: 'isnet', // Use larger, more accurate model for better shadow removal
                 progress: (key: string, current: number, total: number) => {
-                    const percent = Math.round((current / total) * 100);
-                    // Only log significant updates to avoid spam
-                    if (percent % 20 === 0) {
-                        logger.log(`Descargando AI: ${key} ${percent}%`);
+                    // Logic: 
+                    // 'fetch' indicates downloading model (0-50%)
+                    // 'compute' (if available, mostly internal) or inference time (50-100%)
+                    // Since imgly only gives download progress reliably, we map it.
+
+                    if (key.includes('fetch')) {
+                        const percent = Math.round((current / total) * 50);
+                        if (onProgress) onProgress(percent);
                     }
                 }
             };
 
-            const blob = await removeBackground(imageBase64, config);
+            // Manual simulation for inference part since imgly doesn't stream inference progress easily
+            let simProgress = 50;
+            const progressInterval = setInterval(() => {
+                simProgress += (95 - simProgress) * 0.1;
+                if (onProgress) onProgress(Math.round(simProgress));
+            }, 200);
 
-            const duration = ((Date.now() - start) / 1000).toFixed(1);
-            logger.log(`¡Fondo eliminado localmente en ${duration}s!`);
+            try {
+                const blob = await removeBackground(imageBase64, config);
+                clearInterval(progressInterval);
+                if (onProgress) onProgress(100);
 
-            // Convert Blob to Base64
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result as string);
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
-            });
+                const duration = ((Date.now() - start) / 1000).toFixed(1);
+                logger.log(`¡Fondo eliminado localmente en ${duration}s!`);
+
+                // Convert Blob to Base64
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+            } catch (e) {
+                clearInterval(progressInterval);
+                throw e;
+            }
 
         } else if (task === 'EDIT' && userInstruction) {
             logger.log("Aplicando filtros con Canvas API...");
-            return await applyCanvasFilter(imageBase64, userInstruction);
+            if (onProgress) onProgress(50);
+            const res = await applyCanvasFilter(imageBase64, userInstruction);
+            if (onProgress) onProgress(100);
+            return res;
         }
 
         return imageBase64;

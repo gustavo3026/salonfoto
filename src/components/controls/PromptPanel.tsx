@@ -17,19 +17,21 @@ export function PromptPanel() {
 
         try {
             setIsProcessing(true);
-            updateImage(id, { status: 'processing' });
+            updateImage(id, { status: 'processing', progress: 0 });
 
             const inputImage = useProcessedAsInput && img.processed ? img.processed : img.original;
 
             const processedBase64 = await processImageWithGemini(
                 inputImage,
                 task,
-                instruction
+                instruction,
+                (p) => updateImage(id, { progress: p })
             );
 
             updateImage(id, {
                 processed: processedBase64,
-                status: 'done'
+                status: 'done',
+                progress: 100
             });
         } catch (error) {
             console.error(error);
