@@ -69,7 +69,7 @@ export function PromptPanel() {
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (!activeImage || editorMode !== 'CUTOUT') return;
+            if (!activeImage) return;
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
                 e.preventDefault();
@@ -114,6 +114,34 @@ export function PromptPanel() {
 
                 {editorMode === 'ADJUST' ? (
                     <>
+                        {/* Undo/Redo for Adjust */}
+                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', justifyContent: 'center' }}>
+                            <button
+                                onClick={handleUndo}
+                                disabled={activeImage?.historyIndex === undefined || activeImage.historyIndex <= 0}
+                                title="Deshacer (Ctrl+Z)"
+                                style={{
+                                    background: 'var(--color-surface-hover)', border: 'none', color: 'white',
+                                    padding: '0.5rem', borderRadius: '50%', cursor: 'pointer',
+                                    opacity: (activeImage?.historyIndex === undefined || activeImage.historyIndex <= 0) ? 0.3 : 1
+                                }}
+                            >
+                                <Undo size={20} />
+                            </button>
+                            <button
+                                onClick={handleRedo}
+                                disabled={!activeImage?.history || !activeImage.historyIndex || activeImage.historyIndex >= activeImage.history.length - 1}
+                                title="Rehacer (Ctrl+Y)"
+                                style={{
+                                    background: 'var(--color-surface-hover)', border: 'none', color: 'white',
+                                    padding: '0.5rem', borderRadius: '50%', cursor: 'pointer',
+                                    opacity: (!activeImage?.history || !activeImage.historyIndex || activeImage.historyIndex >= activeImage.history.length - 1) ? 0.3 : 1
+                                }}
+                            >
+                                <Redo size={20} />
+                            </button>
+                        </div>
+
                         {/* Brightness */}
                         <div style={{ marginBottom: '2rem' }}>
                             <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>
@@ -185,7 +213,8 @@ export function PromptPanel() {
                                 />
                             </div>
                             <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>
-                                Aumenta para eliminar sombras suaves.
+                                Aumenta para eliminar sombras suaves. <br />
+                                <span style={{ color: '#fbbf24' }}>⚠ Cuidado con objetos oscuros.</span>
                             </p>
                         </div>
 

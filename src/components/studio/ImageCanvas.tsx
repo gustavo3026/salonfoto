@@ -17,6 +17,7 @@ export function ImageCanvas() {
     const [showOriginal, setShowOriginal] = useState(false);
     const [downloadModalOpen, setDownloadModalOpen] = useState(false);
     const [lassoPath, setLassoPath] = useState<{ x: number, y: number }[]>([]);
+    const [imgDimensions, setImgDimensions] = useState({ width: 1, height: 1 });
 
     // Load original image for restoration source
     useEffect(() => {
@@ -47,9 +48,10 @@ export function ImageCanvas() {
                 canvas.width = img.naturalWidth;
                 canvas.height = img.naturalHeight;
             }
+            setImgDimensions({ width: img.naturalWidth, height: img.naturalHeight });
             ctx.drawImage(img, 0, 0);
         };
-    }, [editorMode, activeImage?.id]);
+    }, [editorMode, activeImage?.id, activeImage?.processed]);
 
     const handlePointerDown = (e: React.PointerEvent) => {
         if (editorMode !== 'CUTOUT') return;
@@ -411,13 +413,21 @@ export function ImageCanvas() {
 
                 {/* Lasso Overlay */}
                 {editorMode === 'CUTOUT' && brushTool === 'GUIDED' && lassoPath.length > 0 && (
-                    <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+                    <svg
+                        viewBox={`0 0 ${imgDimensions.width} ${imgDimensions.height}`}
+                        preserveAspectRatio="none"
+                        style={{
+                            position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none',
+                            transform: `translate(${x}px, ${y}px) scale(${scale})`,
+                            transformOrigin: 'center center'
+                        }}
+                    >
                         <polyline
                             points={lassoPath.map(p => `${p.x},${p.y}`).join(' ')}
                             fill="rgba(255, 0, 0, 0.2)"
                             stroke="red"
-                            strokeWidth="2"
-                            strokeDasharray="5,5"
+                            strokeWidth={Math.max(imgDimensions.width, imgDimensions.height) / 500 * 2} // Scale stroke with image
+                            strokeDasharray={`${Math.max(imgDimensions.width, imgDimensions.height) / 200}, ${Math.max(imgDimensions.width, imgDimensions.height) / 200}`}
                         />
                     </svg>
                 )}
