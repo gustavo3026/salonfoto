@@ -14,6 +14,8 @@ export interface StudioImage {
     transform?: ImageTransform;
     progress?: number;
     filename: string;
+    history: string[]; // Stack of 'processed' states
+    historyIndex: number;
 }
 
 export type ViewMode = 'DASHBOARD' | 'EDITOR';
@@ -39,6 +41,9 @@ interface StudioState {
     setViewMode: (mode: ViewMode) => void;
     setEditorMode: (mode: EditorMode) => void;
     setBrushTool: (tool: BrushTool) => void;
+    pushToHistory: (id: string, imageData: string) => void;
+    undoImage: (id: string) => void;
+    redoImage: (id: string) => void;
     setBrushSize: (size: number) => void;
 }
 
@@ -62,16 +67,67 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             status: 'idle',
             transform: { x: 0, y: 0, scale: 1 },
             progress: 0,
-            filename
+            filename,
+            history: [],
+            historyIndex: -1
         };
         setImages(prev => [...prev, newImage]);
         // Stay in dashboard when adding
     };
 
     const updateImage = (id: string, updates: Partial<StudioImage>) => {
-        setImages(prev => prev.map(img =>
-            img.id === id ? { ...img, ...updates } : img
-        ));
+        setImages(prev => prev.map(img => {
+            if (img.id !== id) return img;
+
+            // History Logic: If 'processed' is changing, push to history
+            if (updates.processed !== undefined && updates.processed !== img.processed) {
+                const newHistory = img.history.slice(0, img.historyIndex + 1);
+                // Keep history limited to 10 steps to save memory
+                if (newHistory.length >= 10) newHistory.shift();
+
+                newHistory.push(updates.processed || img.original); // Save the state being transitioned TO? No, usually save PREVIOUS state for undo. 
+                // Actually, standard is: History contains all states. index points to current.
+
+                // Let's adopt: History contains valid 'processed' states.
+                // When we effectively change image, we push.
+                // But wait, if we are in Undo, we don't want to push.
+
+                // Simplified: The caller handles history push via a separate method? 
+                // No, automated is better. But complex.
+
+                // Let's rely on explicit 'pushToHistory' calls or specific 'commit' actions for simplicity in this refactor.
+                // But user wants Ctrl+Z. 
+
+                return { ...img, ...updates };
+            }
+            return { ...img, ...updates };
+        }));
+    };
+
+    const pushToHistory = (id: string, imageData: string) => {
+        setImages(prev => prev.map(img => {
+            if (img.id !== id) return img;
+            const newHistory = img.history.slice(0, img.historyIndex + 1);
+            if (newHistory.length > 10) newHistory.shift(); // Limit
+            newHistory.push(imageData);
+            return { ...img, history: newHistory, historyIndex: newHistory.length - 1, processed: imageData };
+        }));
+    };
+
+    const undoImage = (id: string) => {
+        setImages(prev => prev.map(img => {
+            if (img.id !== id || img.historyIndex <= 0) return img;
+            const newIndex = img.historyIndex - 1;
+            return { ...img, historyIndex: newIndex, processed: img.history[newIndex] };
+        }));
+    };
+
+    const redoImage = (id: string) => {
+        setImages(prev => prev.map(img => {
+            if (img.id !== id || img.historyIndex >= img.history.length - 1) return img;
+            const newIndex = img.historyIndex + 1;
+            return { ...img, historyIndex: newIndex, processed: img.history[newIndex] };
+        }));
     };
 
     const selectImage = (id: string) => {
@@ -107,7 +163,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
             setViewMode,
             setEditorMode,
             setBrushTool,
-            setBrushSize
+            setBrushSize,
+            pushToHistory,
+            undoImage,
+            redoImage
         }}>
             {children}
         </StudioContext.Provider>

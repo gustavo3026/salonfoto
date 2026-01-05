@@ -1,10 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useStudio } from '../../context/StudioContext';
 import { processImageWithGemini } from '../../services/api';
-import { Zap, Sun, Palette, Cloud, Scissors, Contrast } from 'lucide-react';
+import { Zap, Sun, Palette, Cloud, Scissors, Contrast, Undo, Redo } from 'lucide-react';
 
 export function PromptPanel() {
-    const { images, selectedId, updateImage, setIsProcessing, editorMode, brushTool, setBrushTool, brushSize, setBrushSize } = useStudio();
+    const {
+        images, selectedId, updateImage, setIsProcessing,
+        editorMode, setEditorMode,
+        brushTool, setBrushTool, brushSize, setBrushSize,
+        undoImage, redoImage
+    } = useStudio();
     const activeImage = images.find(img => img.id === selectedId);
 
     const [brightness, setBrightness] = useState(1.2);
@@ -51,6 +56,34 @@ export function PromptPanel() {
         if (!activeImage) return;
         await processSingleImage(activeImage.id, 'EDIT', `${type}:${value}`, true);
     };
+
+    const handleUndo = () => {
+        if (!activeImage) return;
+        undoImage(activeImage.id);
+    };
+
+    const handleRedo = () => {
+        if (!activeImage) return;
+        redoImage(activeImage.id);
+    };
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (!activeImage || editorMode !== 'CUTOUT') return;
+
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                e.preventDefault();
+                undoImage(activeImage.id);
+            }
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) {
+                e.preventDefault();
+                redoImage(activeImage.id);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [activeImage?.id, editorMode, undoImage, redoImage]);
 
     return (
         <div style={{ width: '320px', borderLeft: '1px solid var(--color-border)', background: 'var(--color-surface)', display: 'flex', flexDirection: 'column' }}>
@@ -233,9 +266,36 @@ export function PromptPanel() {
                                         cursor: 'pointer'
                                     }}
                                 >
-                                    Guiado (WIP)
+                                    Guiado
                                 </button>
                             </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', justifyContent: 'center' }}>
+                            <button
+                                onClick={handleUndo}
+                                disabled={!activeImage.historyIndex || activeImage.historyIndex < 0}
+                                title="Deshacer (Ctrl+Z)"
+                                style={{
+                                    background: 'var(--color-surface-hover)', border: 'none', color: 'white',
+                                    padding: '0.5rem', borderRadius: '50%', cursor: 'pointer',
+                                    opacity: (!activeImage.historyIndex || activeImage.historyIndex < 0) ? 0.3 : 1
+                                }}
+                            >
+                                <Undo size={20} />
+                            </button>
+                            <button
+                                onClick={handleRedo}
+                                disabled={!activeImage.history || activeImage.historyIndex >= activeImage.history.length - 1}
+                                title="Rehacer (Ctrl+Y)"
+                                style={{
+                                    background: 'var(--color-surface-hover)', border: 'none', color: 'white',
+                                    padding: '0.5rem', borderRadius: '50%', cursor: 'pointer',
+                                    opacity: (!activeImage.history || activeImage.historyIndex >= activeImage.history.length - 1) ? 0.3 : 1
+                                }}
+                            >
+                                <Redo size={20} />
+                            </button>
                         </div>
 
                         <div>
@@ -257,6 +317,6 @@ export function PromptPanel() {
             <div style={{ padding: '1rem', borderTop: '1px solid var(--color-border)', fontSize: '0.75rem', color: 'var(--color-text-muted)', textAlign: 'center' }}>
                 SALON DE FOTOS v2.2
             </div>
-        </div>
+        </div >
     );
 }

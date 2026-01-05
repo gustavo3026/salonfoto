@@ -1,11 +1,11 @@
 import { useRef, useEffect, useState } from 'react';
 import { useStudio } from '../../context/StudioContext';
 import Moveable from 'react-moveable';
-import { Loader2, Upload, Download, Eye, EyeOff, Plus, Minus } from 'lucide-react';
+import { Loader2, Upload, Download, Eye, EyeOff, Plus, Minus, Trash2 } from 'lucide-react';
 import { DownloadOptionsModal } from '../common/DownloadOptionsModal';
 
 export function ImageCanvas() {
-    const { images, selectedId, updateImage, addImage, isProcessing, editorMode, brushTool, brushSize } = useStudio();
+    const { images, selectedId, updateImage, addImage, isProcessing, editorMode, brushTool, brushSize, pushToHistory } = useStudio();
     const activeImage = images.find(img => img.id === selectedId);
 
     const targetRef = useRef<HTMLImageElement>(null);
@@ -16,6 +16,7 @@ export function ImageCanvas() {
     const [isDrawing, setIsDrawing] = useState(false);
     const [showOriginal, setShowOriginal] = useState(false);
     const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+    const [lassoPath, setLassoPath] = useState<{ x: number, y: number }[]>([]);
 
     // Load original image for restoration source
     useEffect(() => {
@@ -52,15 +53,38 @@ export function ImageCanvas() {
 
     const handlePointerDown = (e: React.PointerEvent) => {
         if (editorMode !== 'CUTOUT') return;
-        if (!canvasRef.current) return;
+        if (!canvasRef.current || !activeImage) return;
+
+        const canvas = canvasRef.current;
+        const rect = canvas.getBoundingClientRect();
+        // Calculate canvas coordinates
+        // NOTE: We need to account for scale/transform maybe?
+        // Actually, the mouse coordinates map to visual. We need strictly internal canvas coordinates.
+        // The display scale is handled by CSS transform, but getting bounding rect gives us displayed size.
+        // Mapping (clientX - left) / width * naturalWidth gives correct internal X.
+
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const x = (e.clientX - rect.left) * scaleX;
+        const y = (e.clientY - rect.top) * scaleY;
 
         if (brushTool === 'GUIDED') {
-            handleGuidedClick(e);
+            // New Lasso Logic
+            (e.target as HTMLElement).setPointerCapture(e.pointerId);
+            setIsDrawing(true);
+            handleLassoStart(x, y);
             return;
         }
 
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
         setIsDrawing(true);
+
+        // For normal brush, we want to save history on start? No, usually on end.
+        // Ideally we save BEFORE we start painting.
+        if (brushTool === 'ERASE' || brushTool === 'RESTORE') {
+            pushToHistory(activeImage.id, canvas.toDataURL('image/png'));
+        }
+
         paint(e);
     };
 
@@ -72,6 +96,20 @@ export function ImageCanvas() {
         }
 
         if (!isDrawing) return;
+
+        if (brushTool === 'GUIDED') {
+            const canvas = canvasRef.current;
+            if (canvas) {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                handleLassoMove(x, y);
+            }
+            return;
+        }
+
         paint(e);
     };
 
@@ -85,6 +123,11 @@ export function ImageCanvas() {
         if (!isDrawing) return;
         setIsDrawing(false);
         (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+
+        if (brushTool === 'GUIDED') {
+            // End lasso - keep path for review/delete
+            return;
+        }
 
         // Save result
         if (canvasRef.current && activeImage) {
@@ -137,78 +180,40 @@ export function ImageCanvas() {
         }
     };
 
-    const performFloodFill = (ctx: CanvasRenderingContext2D, startX: number, startY: number) => {
-        const width = ctx.canvas.width;
-        const height = ctx.canvas.height;
-        const imageData = ctx.getImageData(0, 0, width, height);
-        const data = imageData.data;
 
-        // Get target color
-        const targetIdx = (Math.round(startY) * width + Math.round(startX)) * 4;
-        const targetR = data[targetIdx];
-        const targetG = data[targetIdx + 1];
-        const targetB = data[targetIdx + 2];
-        const targetA = data[targetIdx + 3];
 
-        // If transparent, nothing to do
-        if (targetA === 0) return;
-
-        const visited = new Uint8Array(width * height);
-        const queue: [number, number][] = [[Math.round(startX), Math.round(startY)]];
-
-        // Simple tolerance
-        const tolerance = 30;
-
-        while (queue.length > 0) {
-            const [cx, cy] = queue.shift()!;
-            const idx = (cy * width + cx) * 4;
-
-            if (visited[cy * width + cx]) continue;
-            visited[cy * width + cx] = 1;
-
-            const r = data[idx];
-            const g = data[idx + 1];
-            const b = data[idx + 2];
-            const a = data[idx + 3];
-
-            // Match condition
-            if (
-                Math.abs(r - targetR) < tolerance &&
-                Math.abs(g - targetG) < tolerance &&
-                Math.abs(b - targetB) < tolerance &&
-                Math.abs(a - targetA) < tolerance
-            ) {
-                // Erase pixel
-                data[idx + 3] = 0;
-
-                // Add neighbors
-                if (cx > 0) queue.push([cx - 1, cy]);
-                if (cx < width - 1) queue.push([cx + 1, cy]);
-                if (cy > 0) queue.push([cx, cy - 1]);
-                if (cy < height - 1) queue.push([cx, cy + 1]);
-            }
-        }
-
-        ctx.putImageData(imageData, 0, 0);
-    };
-
-    const handleGuidedClick = (e: React.PointerEvent) => {
-        if (!canvasRef.current || !activeImage) return;
+    const deleteSelection = () => {
+        if (!canvasRef.current || !activeImage || lassoPath.length < 3) return;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const rect = canvas.getBoundingClientRect();
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
-        const x = (e.clientX - rect.left) * scaleX;
-        const y = (e.clientY - rect.top) * scaleY;
+        // Save current state to history BEFORE changes
+        pushToHistory(activeImage.id, canvas.toDataURL('image/png'));
 
-        performFloodFill(ctx, x, y);
+        ctx.save();
+        ctx.beginPath();
+        lassoPath.forEach((p, i) => {
+            if (i === 0) ctx.moveTo(p.x, p.y);
+            else ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fill();
+        ctx.restore();
 
-        // Save
+        // Save result
         const newData = canvas.toDataURL('image/png');
         updateImage(activeImage.id, { processed: newData });
+        setLassoPath([]); // Clear selection
+    };
+
+    const handleLassoStart = (x: number, y: number) => {
+        setLassoPath([{ x, y }]);
+    };
+
+    const handleLassoMove = (x: number, y: number) => {
+        setLassoPath(prev => [...prev, { x, y }]);
     };
 
     const handleDrop = (e: React.DragEvent) => {
@@ -386,7 +391,7 @@ export function ImageCanvas() {
                             position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
                             objectFit: 'contain',
                             transform: `translate(${x}px, ${y}px) scale(${scale})`,
-                            transformOrigin: 'top left',
+                            transformOrigin: 'center center',
                             touchAction: 'none'
                         }}
                         onPointerDown={handlePointerDown}
@@ -405,6 +410,37 @@ export function ImageCanvas() {
                         }}
                         onDragStart={(e) => e.preventDefault()}
                     />
+                )}
+
+                {/* Lasso Overlay */}
+                {editorMode === 'CUTOUT' && brushTool === 'GUIDED' && lassoPath.length > 0 && (
+                    <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
+                        <polyline
+                            points={lassoPath.map(p => `${p.x},${p.y}`).join(' ')}
+                            fill="rgba(255, 0, 0, 0.2)"
+                            stroke="red"
+                            strokeWidth="2"
+                            strokeDasharray="5,5"
+                        />
+                    </svg>
+                )}
+
+                {/* Delete Selection Button */}
+                {lassoPath.length > 2 && (
+                    <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 10 }}>
+                        <button
+                            onClick={deleteSelection}
+                            style={{
+                                background: 'white', color: 'red', border: '1px solid red',
+                                padding: '0.5rem 1rem', borderRadius: '4px',
+                                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                boxShadow: '0 2px 4px rgba(0,0,0,0.1)', cursor: 'pointer', fontWeight: 600
+                            }}
+                        >
+                            <Trash2 size={16} />
+                            Eliminar
+                        </button>
+                    </div>
                 )}
 
                 {activeImage && editorMode === 'ADJUST' && (
