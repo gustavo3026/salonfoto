@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { useStudio } from '../../context/StudioContext';
 import Moveable from 'react-moveable';
-import { Loader2, Upload } from 'lucide-react';
+import { Loader2, Upload, Download, Eye, EyeOff } from 'lucide-react';
 
 export function ImageCanvas() {
     const { images, selectedId, updateImage, addImage, isProcessing, editorMode, brushTool, brushSize } = useStudio();
@@ -13,6 +13,7 @@ export function ImageCanvas() {
     const cursorRef = useRef<HTMLDivElement>(null);
 
     const [isDrawing, setIsDrawing] = useState(false);
+    const [showOriginal, setShowOriginal] = useState(false);
 
     // Load original image for restoration source
     useEffect(() => {
@@ -144,6 +145,16 @@ export function ImageCanvas() {
         }
     };
 
+    const handleDownload = () => {
+        if (!activeImage) return;
+        const link = document.createElement('a');
+        link.href = activeImage.processed || activeImage.original;
+        link.download = `salonfoto-${activeImage.id.slice(0, 8)}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
     useEffect(() => {
         if (activeImage && !activeImage.transform) {
             updateImage(activeImage.id, { transform: { x: 0, y: 0, scale: 1 } });
@@ -161,6 +172,9 @@ export function ImageCanvas() {
 
     const { x = 0, y = 0, scale = 1 } = activeImage.transform || {};
 
+    // Determine what to show: Original OR (Processed if available, else Original)
+    const displaySrc = showOriginal ? activeImage.original : (activeImage.processed || activeImage.original);
+
     return (
         <div
             className="canvas-area"
@@ -174,6 +188,29 @@ export function ImageCanvas() {
             onPointerMove={handlePointerMove} // Capture global move for cursor
             onPointerLeave={handlePointerLeave}
         >
+            {/* Toolbar Controls */}
+            <div style={{
+                position: 'absolute', top: '1rem', right: '1rem', zIndex: 100,
+                display: 'flex', gap: '0.5rem', background: 'rgba(0,0,0,0.5)', padding: '0.5rem', borderRadius: '8px'
+            }}>
+                <button
+                    onClick={() => setShowOriginal(!showOriginal)}
+                    title={showOriginal ? "Ver Editado" : "Ver Original"}
+                    style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                >
+                    {showOriginal ? <EyeOff size={20} /> : <Eye size={20} />}
+                    <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>{showOriginal ? 'Original' : 'Resultado'}</span>
+                </button>
+                <div style={{ width: '1px', background: 'rgba(255,255,255,0.2)' }} />
+                <button
+                    onClick={handleDownload}
+                    title="Descargar esta imagen"
+                    style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}
+                >
+                    <Download size={20} />
+                </button>
+            </div>
+
             {/* Custom Brush Cursor */}
             {editorMode === 'CUTOUT' && (
                 <div
@@ -219,7 +256,7 @@ export function ImageCanvas() {
                 ) : (
                     <img
                         ref={targetRef}
-                        src={activeImage.processed || activeImage.original}
+                        src={displaySrc}
                         alt="Canvas"
                         style={{
                             position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
