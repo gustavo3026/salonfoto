@@ -2,6 +2,7 @@ import { useRef, useEffect, useState } from 'react';
 import { useStudio } from '../../context/StudioContext';
 import Moveable from 'react-moveable';
 import { Loader2, Upload, Download, Eye, EyeOff } from 'lucide-react';
+import { DownloadOptionsModal } from '../common/DownloadOptionsModal';
 
 export function ImageCanvas() {
     const { images, selectedId, updateImage, addImage, isProcessing, editorMode, brushTool, brushSize } = useStudio();
@@ -14,6 +15,7 @@ export function ImageCanvas() {
 
     const [isDrawing, setIsDrawing] = useState(false);
     const [showOriginal, setShowOriginal] = useState(false);
+    const [downloadModalOpen, setDownloadModalOpen] = useState(false);
 
     // Load original image for restoration source
     useEffect(() => {
@@ -145,11 +147,43 @@ export function ImageCanvas() {
         }
     };
 
-    const handleDownload = () => {
+    const handleDownloadClick = () => {
         if (!activeImage) return;
+        setDownloadModalOpen(true);
+    };
+
+    const processDownload = async (useWhiteBackground: boolean) => {
+        setDownloadModalOpen(false);
+        if (!activeImage) return;
+
+        const src = activeImage.processed || activeImage.original;
+
         const link = document.createElement('a');
-        link.href = activeImage.processed || activeImage.original;
-        link.download = `salonfoto-${activeImage.id.slice(0, 8)}.png`;
+
+        if (useWhiteBackground) {
+            // Composite with white background
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.src = src;
+            await new Promise((resolve) => { img.onload = resolve; });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.fillStyle = 'white';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+                link.href = canvas.toDataURL('image/jpeg', 0.9);
+                link.download = `salonfoto-${activeImage.id.slice(0, 8)}.jpg`;
+            }
+        } else {
+            // Transparent PNG
+            link.href = src;
+            link.download = `salonfoto-${activeImage.id.slice(0, 8)}.png`;
+        }
+
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -188,6 +222,12 @@ export function ImageCanvas() {
             onPointerMove={handlePointerMove} // Capture global move for cursor
             onPointerLeave={handlePointerLeave}
         >
+            <DownloadOptionsModal
+                isOpen={downloadModalOpen}
+                onClose={() => setDownloadModalOpen(false)}
+                onConfirm={processDownload}
+            />
+
             {/* Toolbar Controls */}
             <div style={{
                 position: 'absolute', top: '1rem', right: '1rem', zIndex: 100,
@@ -203,7 +243,7 @@ export function ImageCanvas() {
                 </button>
                 <div style={{ width: '1px', background: 'rgba(255,255,255,0.2)' }} />
                 <button
-                    onClick={handleDownload}
+                    onClick={handleDownloadClick}
                     title="Descargar esta imagen"
                     style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}
                 >
@@ -231,11 +271,15 @@ export function ImageCanvas() {
             <div
                 style={{
                     width: '600px', height: '600px',
+                    // Changed to simpler checkerboard for generic transparency feel
                     background: editorMode === 'CUTOUT' ? 'transparent' : 'white',
-                    backgroundImage: editorMode === 'CUTOUT' ? 'linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%)' : 'none',
+                    backgroundImage: editorMode === 'CUTOUT' ?
+                        `linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%, #ccc), 
+                         linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%, #ccc)`
+                        : 'none',
                     backgroundSize: '20px 20px',
+                    backgroundPosition: '0 0, 10px 10px', // Standard checkerboard offset
                     backgroundColor: editorMode === 'CUTOUT' ? 'white' : 'white',
-                    backgroundPosition: '0 0, 0 10px, 10px -10px, -10px 0px',
                     boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
                     position: 'relative', overflow: 'hidden'
                 }}

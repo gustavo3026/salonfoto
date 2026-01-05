@@ -1,8 +1,83 @@
 import { useStudio } from '../../context/StudioContext';
-import { Pencil, Trash2, Plus, Loader2 } from 'lucide-react';
+import { Pencil, Trash2, Plus, Loader2, Download } from 'lucide-react';
+import JSZip from 'jszip';
+import { useState } from 'react';
+import { DownloadOptionsModal } from '../common/DownloadOptionsModal';
+
+import { processImageWithGemini } from '../../services/api';
 
 export function Dashboard() {
-    const { images, selectImage, deleteImage, addImage } = useStudio();
+    const { images, selectImage, deleteImage, addImage, updateImage } = useStudio();
+    const [downloadModalOpen, setDownloadModalOpen] = useState(false);
+
+    const handleBatchProcess = async () => {
+        const idleImages = images.filter(img => img.status === 'idle');
+        if (idleImages.length === 0) return;
+
+        // Process sequentially to be nice to the browser thread
+        for (const img of idleImages) {
+            try {
+                updateImage(img.id, { status: 'processing' });
+                const result = await processImageWithGemini(img.original, 'REMOVE_BG');
+                updateImage(img.id, { status: 'done', processed: result });
+            } catch (err) {
+                console.error("Batch error", err);
+                updateImage(img.id, { status: 'error' });
+            }
+        }
+    };
+
+    const handleBatchDownloadClick = () => {
+        if (!images.some(img => img.status === 'done')) return;
+        setDownloadModalOpen(true);
+    };
+
+    const processBatchDownload = async (useWhiteBackground: boolean) => {
+        setDownloadModalOpen(false);
+        const doneImages = images.filter(img => img.status === 'done');
+        if (doneImages.length === 0) return;
+
+        const zip = new JSZip();
+
+        for (let i = 0; i < doneImages.length; i++) {
+            const imgData = doneImages[i];
+            const src = imgData.processed || imgData.original;
+            const filename = `foto-${i + 1}`;
+
+            if (useWhiteBackground) {
+                // Composite
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.src = src;
+                await new Promise((resolve) => { img.onload = resolve; });
+
+                const canvas = document.createElement('canvas');
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0);
+                    // Get base64 without prefix
+                    const data = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+                    zip.file(`${filename}.jpg`, data, { base64: true });
+                }
+            } else {
+                // Transparent PNG
+                const data = src.split(',')[1]; // Remove prefix
+                zip.file(`${filename}.png`, data, { base64: true });
+            }
+        }
+
+        const content = await zip.generateAsync({ type: 'blob' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(content);
+        link.download = `lote-fotos-${Date.now()}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
@@ -17,8 +92,17 @@ export function Dashboard() {
         }
     };
 
+    const doneCount = images.filter(img => img.status === 'done').length;
+
     return (
         <div style={{ padding: '2rem', height: '100%', overflowY: 'auto' }}>
+            <DownloadOptionsModal
+                isOpen={downloadModalOpen}
+                onClose={() => setDownloadModalOpen(false)}
+                onConfirm={processBatchDownload}
+                count={doneCount}
+            />
+
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
                 <div>
                     <h2 style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text)' }}>
@@ -28,6 +112,28 @@ export function Dashboard() {
                 </div>
 
                 <div style={{ display: 'flex', gap: '1rem' }}>
+                    {/* Batch Process Button */}
+                    <button
+                        className="btn btn-primary"
+                        onClick={handleBatchProcess}
+                        disabled={!images.some(img => img.status === 'idle')}
+                    >
+                        <Loader2 size={16} className={images.some(img => img.status === 'processing') ? "animate-spin" : ""} />
+                        Procesar Todo
+                    </button>
+
+                    {/* Batch Download Button */}
+                    {doneCount > 0 && (
+                        <button
+                            className="btn btn-secondary"
+                            onClick={handleBatchDownloadClick}
+                            style={{ background: '#10b981', color: 'white', border: 'none' }}
+                        >
+                            <Download size={16} />
+                            Descargar {doneCount}
+                        </button>
+                    )}
+
                     <label className="btn" style={{ cursor: 'pointer', border: '1px solid var(--color-border)' }}>
                         <Plus size={16} />
                         Añadir
