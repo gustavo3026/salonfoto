@@ -61,6 +61,7 @@ export async function processImageWithGemini(
 
             // Config object for progress tracking
             const config: Config = {
+                model: 'isnet', // Use larger, more accurate model for better shadow removal
                 progress: (key: string, current: number, total: number) => {
                     const percent = Math.round((current / total) * 100);
                     // Only log significant updates to avoid spam
