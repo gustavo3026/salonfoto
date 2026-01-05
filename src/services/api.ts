@@ -51,6 +51,9 @@ const applyCanvasFilter = async (base64: string, filter: string): Promise<string
 };
 
 const applyAlphaThreshold = async (base64: string, threshold: number): Promise<string> => {
+    // Optimization: If threshold is 0, no change needed.
+    if (threshold === 0) return base64;
+
     const img = await loadImage(base64);
     const canvas = document.createElement('canvas');
     canvas.width = img.width;
@@ -62,14 +65,21 @@ const applyAlphaThreshold = async (base64: string, threshold: number): Promise<s
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const data = imageData.data;
 
-    // Threshold is 0-100 mapped to 0-255 opacity
-    // Any pixel with alpha < limit will be set to 0
     const limit = (threshold / 100) * 255;
+    const len = data.length;
+    const chunkSize = 200000; // Process 200k bytes (~50k pixels) per tick
 
-    for (let i = 3; i < data.length; i += 4) {
-        if (data[i] < limit) {
-            data[i] = 0; // Clear pixel
+    // Process in chunks to avoid blocking the main thread
+    for (let i = 0; i < len; i += chunkSize) {
+        const end = Math.min(i + chunkSize, len);
+        // Inner loop: highly optimized
+        for (let j = i + 3; j < end; j += 4) {
+            if (data[j] < limit) {
+                data[j] = 0;
+            }
         }
+        // Yield to event loop
+        await new Promise(resolve => setTimeout(resolve, 0));
     }
 
     ctx.putImageData(imageData, 0, 0);
