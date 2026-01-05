@@ -296,7 +296,7 @@ export function ImageCanvas() {
             style={{
                 flex: 1, position: 'relative', background: '#1e293b',
                 overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%',
-                cursor: editorMode === 'CUTOUT' ? 'none' : 'default' // Hide default cursor in cutout
+                cursor: editorMode === 'CUTOUT' && brushTool !== 'GUIDED' ? 'none' : (editorMode === 'CUTOUT' && brushTool === 'GUIDED' ? 'crosshair' : 'default')
             }}
             onDrop={handleDrop}
             onDragOver={(e) => e.preventDefault()}
