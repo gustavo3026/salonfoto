@@ -1,4 +1,4 @@
-import { X, Check } from 'lucide-react';
+import { X } from 'lucide-react';
 
 interface DownloadOptionsModalProps {
     isOpen: boolean;
