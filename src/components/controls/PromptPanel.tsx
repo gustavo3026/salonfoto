@@ -6,7 +6,7 @@ import { Zap, Sun, Palette, Cloud, Scissors, Contrast, Undo, Redo } from 'lucide
 export function PromptPanel() {
     const {
         images, selectedId, updateImage, setIsProcessing,
-        editorMode, setEditorMode,
+        editorMode,
         brushTool, setBrushTool, brushSize, setBrushSize,
         undoImage, redoImage
     } = useStudio();
