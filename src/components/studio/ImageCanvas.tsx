@@ -188,9 +188,6 @@ export function ImageCanvas() {
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        // Save current state to history BEFORE changes
-        pushToHistory(activeImage.id, canvas.toDataURL('image/png'));
-
         ctx.save();
         ctx.beginPath();
         lassoPath.forEach((p, i) => {

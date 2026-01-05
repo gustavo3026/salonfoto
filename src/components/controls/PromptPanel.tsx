@@ -274,12 +274,12 @@ export function PromptPanel() {
                         <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.5rem', justifyContent: 'center' }}>
                             <button
                                 onClick={handleUndo}
-                                disabled={!activeImage?.historyIndex || activeImage.historyIndex < 0}
+                                disabled={activeImage?.historyIndex === undefined || activeImage.historyIndex <= 0}
                                 title="Deshacer (Ctrl+Z)"
                                 style={{
                                     background: 'var(--color-surface-hover)', border: 'none', color: 'white',
                                     padding: '0.5rem', borderRadius: '50%', cursor: 'pointer',
-                                    opacity: (!activeImage?.historyIndex || activeImage.historyIndex < 0) ? 0.3 : 1
+                                    opacity: (activeImage?.historyIndex === undefined || activeImage.historyIndex <= 0) ? 0.3 : 1
                                 }}
                             >
                                 <Undo size={20} />
