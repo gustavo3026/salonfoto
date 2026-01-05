@@ -66,7 +66,10 @@ export function Dashboard() {
         for (let i = 0; i < doneImages.length; i++) {
             const imgData = doneImages[i];
             const src = imgData.processed || imgData.original;
-            const filename = `foto-${i + 1}`;
+            // Remove extension from original filename
+            // Remove extension from original filename
+            const nameWithoutExt = imgData.filename.replace(/\.[^/.]+$/, "");
+            const filename = `${nameWithoutExt}-editado`;
 
             if (useWhiteBackground) {
                 // Composite
@@ -117,7 +120,35 @@ export function Dashboard() {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const result = e.target?.result as string;
-                    addImage(result);
+                    addImage(result, file.name);
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            const newFiles = Array.from(e.dataTransfer.files).filter(file => file.type.startsWith('image/'));
+
+            if (images.length + newFiles.length > 100) {
+                alert("El límite es de 100 imágenes por sesión.");
+                return;
+            }
+
+            newFiles.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const result = e.target?.result as string;
+                    addImage(result, file.name);
                 };
                 reader.readAsDataURL(file);
             });
@@ -127,7 +158,11 @@ export function Dashboard() {
     const doneCount = images.filter(img => img.status === 'done').length;
 
     return (
-        <div style={{ padding: '2rem', height: '100%', overflowY: 'auto' }}>
+        <div
+            style={{ padding: '2rem', height: '100%', overflowY: 'auto' }}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+        >
             <DownloadOptionsModal
                 isOpen={downloadModalOpen}
                 onClose={() => setDownloadModalOpen(false)}

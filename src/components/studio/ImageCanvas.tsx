@@ -140,7 +140,7 @@ export function ImageCanvas() {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const result = e.target?.result as string;
-                    addImage(result);
+                    addImage(result, file.name);
                 };
                 reader.readAsDataURL(file);
             });
@@ -176,12 +176,14 @@ export function ImageCanvas() {
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.drawImage(img, 0, 0);
                 link.href = canvas.toDataURL('image/jpeg', 0.9);
-                link.download = `salonfoto-${activeImage.id.slice(0, 8)}.jpg`;
+                const nameWithoutExt = activeImage.filename.replace(/\.[^/.]+$/, "");
+                link.download = `${nameWithoutExt}-editado.jpg`;
             }
         } else {
             // Transparent PNG
             link.href = src;
-            link.download = `salonfoto-${activeImage.id.slice(0, 8)}.png`;
+            const nameWithoutExt = activeImage.filename.replace(/\.[^/.]+$/, "");
+            link.download = `${nameWithoutExt}-editado.png`;
         }
 
         document.body.appendChild(link);

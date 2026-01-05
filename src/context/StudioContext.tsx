@@ -13,6 +13,7 @@ export interface StudioImage {
     status: 'idle' | 'processing' | 'done' | 'error';
     transform?: ImageTransform;
     progress?: number;
+    filename: string;
 }
 
 export type ViewMode = 'DASHBOARD' | 'EDITOR';
@@ -29,7 +30,7 @@ interface StudioState {
     brushTool: BrushTool;
     brushSize: number;
 
-    addImage: (img: string) => void;
+    addImage: (img: string, filename: string) => void;
     updateImage: (id: string, updates: Partial<StudioImage>) => void;
     selectImage: (id: string) => void;
     deleteImage: (id: string) => void;
@@ -53,14 +54,15 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const [brushTool, setBrushTool] = useState<BrushTool>('ERASE');
     const [brushSize, setBrushSize] = useState(20);
 
-    const addImage = (img: string) => {
+    const addImage = (img: string, filename: string) => {
         const newImage: StudioImage = {
             id: crypto.randomUUID(),
             original: img,
             processed: null,
             status: 'idle',
             transform: { x: 0, y: 0, scale: 1 },
-            progress: 0
+            progress: 0,
+            filename
         };
         setImages(prev => [...prev, newImage]);
         // Stay in dashboard when adding

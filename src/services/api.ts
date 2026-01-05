@@ -9,6 +9,9 @@ import type { Config } from "@imgly/background-removal";
 // @ts-ignore
 const removeBackground = (imgly.default as any) || (imgly.removeBackground as any) || (imgly as any);
 
+let modelLoaded = false;
+let hasLoggedInitialization = false;
+
 // Helper to load image
 const loadImage = (src: string): Promise<HTMLImageElement> => {
     return new Promise((resolve, reject) => {
@@ -57,7 +60,13 @@ export async function processImageWithGemini(
 
     try {
         if (task === 'REMOVE_BG') {
-            logger.log("Cargando modelo AI local (@imgly)... Esto puede tardar la primera vez.");
+            if (!modelLoaded && !hasLoggedInitialization) {
+                hasLoggedInitialization = true;
+                logger.log("Cargando modelo AI local (@imgly)... Esto puede tardar la primera vez.");
+            } else if (modelLoaded) {
+                // Info for debug but less alarming
+                console.log("[API] Reusing loaded AI model.");
+            }
             const start = Date.now();
 
             // Config object for progress tracking
@@ -90,6 +99,7 @@ export async function processImageWithGemini(
 
                 const duration = ((Date.now() - start) / 1000).toFixed(1);
                 logger.log(`¡Fondo eliminado localmente en ${duration}s!`);
+                modelLoaded = true;
 
                 // Convert Blob to Base64
                 return new Promise((resolve, reject) => {
