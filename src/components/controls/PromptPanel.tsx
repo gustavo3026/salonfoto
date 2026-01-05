@@ -10,6 +10,7 @@ export function PromptPanel() {
     const [brightness, setBrightness] = useState(1.2);
     const [saturation, setSaturation] = useState(1.0);
     const [contrast, setContrast] = useState(1.0);
+    const [sensitivity, setSensitivity] = useState(0);
 
     const processSingleImage = async (id: string, task: 'REMOVE_BG' | 'EDIT', instruction?: string, useProcessedAsInput = false) => {
         const img = images.find(i => i.id === id);
@@ -46,7 +47,7 @@ export function PromptPanel() {
         await processSingleImage(activeImage.id, 'EDIT', command, true);
     };
 
-    const applyEdit = async (type: 'brightness' | 'saturation' | 'contrast', value: number) => {
+    const applyEdit = async (type: 'brightness' | 'saturation' | 'contrast' | 'sensitivity', value: number) => {
         if (!activeImage) return;
         await processSingleImage(activeImage.id, 'EDIT', `${type}:${value}`, true);
     };
@@ -132,6 +133,27 @@ export function PromptPanel() {
                                     style={{ flex: 1 }}
                                 />
                             </div>
+                        </div>
+
+                        {/* Sensitivity / Alpha Threshold */}
+                        <div style={{ marginBottom: '2rem' }}>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.875rem', fontWeight: 500 }}>
+                                <Cloud size={16} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'middle' }} />
+                                Limpieza de Sombra ({sensitivity})
+                            </label>
+                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                <input
+                                    type="range" min="0" max="100" step="1"
+                                    value={sensitivity}
+                                    onChange={(e) => setSensitivity(parseInt(e.target.value))}
+                                    onMouseUp={() => applyEdit('sensitivity', sensitivity)}
+                                    onTouchEnd={() => applyEdit('sensitivity', sensitivity)}
+                                    style={{ flex: 1 }}
+                                />
+                            </div>
+                            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.5rem' }}>
+                                Aumenta para eliminar sombras suaves.
+                            </p>
                         </div>
 
                         <div style={{ marginBottom: '2rem' }}>

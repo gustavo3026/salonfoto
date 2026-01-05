@@ -50,6 +50,32 @@ const applyCanvasFilter = async (base64: string, filter: string): Promise<string
     return canvas.toDataURL('image/png');
 };
 
+const applyAlphaThreshold = async (base64: string, threshold: number): Promise<string> => {
+    const img = await loadImage(base64);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error("Could not get canvas context");
+
+    ctx.drawImage(img, 0, 0);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+
+    // Threshold is 0-100 mapped to 0-255 opacity
+    // Any pixel with alpha < limit will be set to 0
+    const limit = (threshold / 100) * 255;
+
+    for (let i = 3; i < data.length; i += 4) {
+        if (data[i] < limit) {
+            data[i] = 0; // Clear pixel
+        }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    return canvas.toDataURL('image/png');
+};
+
 export async function processImageWithGemini(
     imageBase64: string,
     task: StudioTask,
@@ -114,6 +140,16 @@ export async function processImageWithGemini(
             }
 
         } else if (task === 'EDIT' && userInstruction) {
+            if (userInstruction.startsWith('sensitivity')) {
+                logger.log("Aplicando limpieza de sombra...");
+                if (onProgress) onProgress(50);
+                const val = parseFloat(userInstruction.split(':')[1]);
+                // val is 0-100
+                const res = await applyAlphaThreshold(imageBase64, val);
+                if (onProgress) onProgress(100);
+                return res;
+            }
+
             logger.log("Aplicando filtros con Canvas API...");
             if (onProgress) onProgress(50);
             const res = await applyCanvasFilter(imageBase64, userInstruction);
