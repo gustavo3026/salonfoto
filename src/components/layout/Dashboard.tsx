@@ -14,8 +14,17 @@ export function Dashboard() {
         const idleImages = images.filter(img => img.status === 'idle');
         if (idleImages.length === 0) return;
 
-        // Process sequentially to be nice to the browser thread
-        for (const img of idleImages) {
+        // Concurrency Control: Process 3 at a time
+        const CONCURRENCY_LIMIT = 3;
+        const queue = [...idleImages];
+        const activePromises: Promise<void>[] = [];
+
+        const processNext = async () => {
+            if (queue.length === 0) return;
+
+            const img = queue.shift();
+            if (!img) return;
+
             try {
                 updateImage(img.id, { status: 'processing' });
                 const result = await processImageWithGemini(img.original, 'REMOVE_BG');
@@ -23,8 +32,18 @@ export function Dashboard() {
             } catch (err) {
                 console.error("Batch error", err);
                 updateImage(img.id, { status: 'error' });
+            } finally {
+                // After one finishes, try to pick up the next one
+                await processNext();
             }
+        };
+
+        // Start initial batch
+        for (let i = 0; i < CONCURRENCY_LIMIT && i < idleImages.length; i++) {
+            activePromises.push(processNext());
         }
+
+        await Promise.all(activePromises);
     };
 
     const handleBatchDownloadClick = () => {
@@ -81,7 +100,15 @@ export function Dashboard() {
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
-            Array.from(e.target.files).forEach(file => {
+            const newFiles = Array.from(e.target.files);
+
+            // Enforce 100 image limit
+            if (images.length + newFiles.length > 100) {
+                alert("El límite es de 100 imágenes por sesión.");
+                return;
+            }
+
+            newFiles.forEach(file => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const result = e.target?.result as string;

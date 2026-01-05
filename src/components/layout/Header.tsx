@@ -1,90 +1,15 @@
-import { Download, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { useStudio } from '../../context/StudioContext';
-import JSZip from 'jszip';
-import { saveAs } from 'file-saver';
-import { useState } from 'react';
-import { processImageWithGemini } from '../../services/api';
-import { bakeImageTransform } from '../../utils/imageUtils';
+
 
 export function Header() {
-    const { images, selectedId, isProcessing, setIsProcessing, updateImage, viewMode, setViewMode, editorMode, setEditorMode } = useStudio();
-    const [isZipping, setIsZipping] = useState(false);
+    const { images, selectedId, isProcessing, setViewMode, viewMode, editorMode, setEditorMode } = useStudio();
 
     const activeImage = images.find(img => img.id === selectedId);
 
-    // Calculate state
-    const hasImages = images.length > 0;
-    // Show Process button if ANY image (original) exists and we are not just reviewing
-    // Logic: If any image status is NOT 'done', show process.
-    const showProcessButton = hasImages && images.some(img => img.status !== 'done');
-    // Show Download button if we have images and they are processed (or we allow partial)
-    // Preference: If process button is hidden (all done), show download.
-    const showDownloadButton = hasImages && !showProcessButton;
-
-    const handleBatchProcess = async () => {
-        setIsProcessing(true);
-        try {
-            // Process sequentially to avoid rate limits or overwhelming backend
-            for (const img of images) {
-                if (img.status === 'done') continue; // Skip already processed
-
-                updateImage(img.id, { status: 'processing' });
-                try {
-                    const result = await processImageWithGemini(img.original, 'REMOVE_BG');
-                    updateImage(img.id, { processed: result, status: 'done' });
-                } catch (e) {
-                    console.error(e);
-                    updateImage(img.id, { status: 'error' });
-                }
-            }
-        } finally {
-            setIsProcessing(false);
-        }
-    };
-
     const handleSaveCurrent = () => {
         // "Hecho" action: Just return to Dashboard. 
-        // We preserve the transform state in the context, so it's non-destructive.
-        // The Dashboard applies it visually via CSS.
-        // The Download action applies it permanently via baking.
         setViewMode('DASHBOARD');
-    };
-
-    const handleBatchDownload = async () => {
-        if (images.length === 0) return;
-        setIsZipping(true);
-        try {
-            const zip = new JSZip();
-            const processedFolder = zip.folder("processed_images");
-
-            for (let i = 0; i < images.length; i++) {
-                const img = images[i];
-                let dataUrl = img.processed || img.original;
-
-                // Non-destructive bake on download
-                if (img.transform && (img.transform.x !== 0 || img.transform.y !== 0 || img.transform.scale !== 1)) {
-                    try {
-                        // Bake the transform into a temporary image for the ZIP
-                        dataUrl = await bakeImageTransform(dataUrl, img.transform);
-                    } catch (e) {
-                        console.error(`Failed to bake image ${img.id}`, e);
-                        // Fallback to unbaked
-                    }
-                }
-
-                const base64Data = dataUrl.replace(/^data:image\/(png|jpeg|jpg);base64,/, "");
-                const ext = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,/)?.[1] || "png";
-                processedFolder?.file(`imagen-${i + 1}.${ext}`, base64Data, { base64: true });
-            }
-
-            const content = await zip.generateAsync({ type: "blob" });
-            saveAs(content, "salon_fotos_batch.zip");
-        } catch (error) {
-            console.error("Failed to zip images", error);
-            alert("Failed to create zip file");
-        } finally {
-            setIsZipping(false);
-        }
     };
 
     return (
@@ -150,28 +75,6 @@ export function Header() {
             </div>
 
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                {viewMode === 'DASHBOARD' && showProcessButton && (
-                    <button
-                        className="btn btn-primary"
-                        onClick={handleBatchProcess}
-                        disabled={isProcessing}
-                    >
-                        {isProcessing ? 'Procesando...' : 'Procesar Todo El Lote'}
-                    </button>
-                )}
-
-                {viewMode === 'DASHBOARD' && showDownloadButton && (
-                    <button
-                        className="btn btn-primary"
-                        onClick={handleBatchDownload}
-                        disabled={isZipping || isProcessing}
-                        style={{ background: '#22c55e', border: 'none' }}
-                    >
-                        {isZipping ? 'Comprimiendo...' : 'Descargar Todo (.zip)'}
-                        <Download size={16} />
-                    </button>
-                )}
-
                 {viewMode === 'EDITOR' && (
                     <button
                         className="btn btn-primary"
