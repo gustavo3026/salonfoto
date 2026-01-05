@@ -18,7 +18,7 @@ export interface StudioImage {
 
 export type ViewMode = 'DASHBOARD' | 'EDITOR';
 export type EditorMode = 'ADJUST' | 'CUTOUT';
-export type BrushTool = 'ERASE' | 'RESTORE';
+export type BrushTool = 'ERASE' | 'RESTORE' | 'GUIDED';
 
 interface StudioState {
     images: StudioImage[];

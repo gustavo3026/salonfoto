@@ -214,19 +214,24 @@ export function PromptPanel() {
                         <div style={{ marginBottom: '2rem' }}>
                             <div style={{ background: 'var(--color-surface-hover)', borderRadius: '99px', padding: '4px', display: 'flex' }}>
                                 <button
+                                    onClick={() => setBrushTool('ERASE')}
                                     style={{
-                                        flex: 1, border: 'none', background: 'var(--color-primary)', color: 'white',
-                                        padding: '0.5rem', borderRadius: '99px', fontSize: '0.875rem', fontWeight: 500
+                                        flex: 1, border: 'none', background: brushTool !== 'GUIDED' ? 'var(--color-primary)' : 'transparent',
+                                        color: brushTool !== 'GUIDED' ? 'white' : 'var(--color-text-muted)',
+                                        padding: '0.5rem', borderRadius: '99px', fontSize: '0.875rem', fontWeight: 500,
+                                        cursor: 'pointer'
                                     }}
                                 >
                                     Manual
                                 </button>
                                 <button
+                                    onClick={() => setBrushTool('GUIDED')}
                                     style={{
-                                        flex: 1, border: 'none', background: 'transparent', color: 'var(--color-text-muted)',
-                                        padding: '0.5rem', borderRadius: '99px', fontSize: '0.875rem', fontWeight: 500
+                                        flex: 1, border: 'none', background: brushTool === 'GUIDED' ? 'var(--color-primary)' : 'transparent',
+                                        color: brushTool === 'GUIDED' ? 'white' : 'var(--color-text-muted)',
+                                        padding: '0.5rem', borderRadius: '99px', fontSize: '0.875rem', fontWeight: 500,
+                                        cursor: 'pointer'
                                     }}
-                                    disabled
                                 >
                                     Guiado (WIP)
                                 </button>

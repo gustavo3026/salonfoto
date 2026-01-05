@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { useStudio } from '../../context/StudioContext';
 import Moveable from 'react-moveable';
-import { Loader2, Upload, Download, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Upload, Download, Eye, EyeOff, Plus, Minus } from 'lucide-react';
 import { DownloadOptionsModal } from '../common/DownloadOptionsModal';
 
 export function ImageCanvas() {
@@ -53,6 +53,11 @@ export function ImageCanvas() {
     const handlePointerDown = (e: React.PointerEvent) => {
         if (editorMode !== 'CUTOUT') return;
         if (!canvasRef.current) return;
+
+        if (brushTool === 'GUIDED') {
+            handleGuidedClick(e);
+            return;
+        }
 
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
         setIsDrawing(true);
@@ -130,6 +135,80 @@ export function ImageCanvas() {
 
             ctx.restore();
         }
+    };
+
+    const performFloodFill = (ctx: CanvasRenderingContext2D, startX: number, startY: number) => {
+        const width = ctx.canvas.width;
+        const height = ctx.canvas.height;
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const data = imageData.data;
+
+        // Get target color
+        const targetIdx = (Math.round(startY) * width + Math.round(startX)) * 4;
+        const targetR = data[targetIdx];
+        const targetG = data[targetIdx + 1];
+        const targetB = data[targetIdx + 2];
+        const targetA = data[targetIdx + 3];
+
+        // If transparent, nothing to do
+        if (targetA === 0) return;
+
+        const visited = new Uint8Array(width * height);
+        const queue: [number, number][] = [[Math.round(startX), Math.round(startY)]];
+
+        // Simple tolerance
+        const tolerance = 30;
+
+        while (queue.length > 0) {
+            const [cx, cy] = queue.shift()!;
+            const idx = (cy * width + cx) * 4;
+
+            if (visited[cy * width + cx]) continue;
+            visited[cy * width + cx] = 1;
+
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            const a = data[idx + 3];
+
+            // Match condition
+            if (
+                Math.abs(r - targetR) < tolerance &&
+                Math.abs(g - targetG) < tolerance &&
+                Math.abs(b - targetB) < tolerance &&
+                Math.abs(a - targetA) < tolerance
+            ) {
+                // Erase pixel
+                data[idx + 3] = 0;
+
+                // Add neighbors
+                if (cx > 0) queue.push([cx - 1, cy]);
+                if (cx < width - 1) queue.push([cx + 1, cy]);
+                if (cy > 0) queue.push([cx, cy - 1]);
+                if (cy < height - 1) queue.push([cx, cy + 1]);
+            }
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+    };
+
+    const handleGuidedClick = (e: React.PointerEvent) => {
+        if (!canvasRef.current || !activeImage) return;
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const x = (e.clientX - rect.left) * scaleX;
+        const y = (e.clientY - rect.top) * scaleY;
+
+        performFloodFill(ctx, x, y);
+
+        // Save
+        const newData = canvas.toDataURL('image/png');
+        updateImage(activeImage.id, { processed: newData });
     };
 
     const handleDrop = (e: React.DragEvent) => {
@@ -235,6 +314,26 @@ export function ImageCanvas() {
                 position: 'absolute', top: '1rem', right: '1rem', zIndex: 100,
                 display: 'flex', gap: '0.5rem', background: 'rgba(0,0,0,0.5)', padding: '0.5rem', borderRadius: '8px'
             }}>
+                {editorMode === 'CUTOUT' && (
+                    <>
+                        <button
+                            onClick={() => activeImage && updateImage(activeImage.id, { transform: { ...activeImage.transform!, scale: Math.min((activeImage.transform?.scale || 1) + 0.1, 5) } })}
+                            title="Acercar (+)"
+                            style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}
+                        >
+                            <Plus size={20} />
+                        </button>
+                        <button
+                            onClick={() => activeImage && updateImage(activeImage.id, { transform: { ...activeImage.transform!, scale: Math.max((activeImage.transform?.scale || 1) - 0.1, 0.1) } })}
+                            title="Alejar (-)"
+                            style={{ background: 'transparent', border: 'none', color: 'white', cursor: 'pointer' }}
+                        >
+                            <Minus size={20} />
+                        </button>
+                        <div style={{ width: '1px', background: 'rgba(255,255,255,0.2)' }} />
+                    </>
+                )}
+
                 <button
                     onClick={() => setShowOriginal(!showOriginal)}
                     title={showOriginal ? "Ver Editado" : "Ver Original"}
@@ -254,7 +353,7 @@ export function ImageCanvas() {
             </div>
 
             {/* Custom Brush Cursor */}
-            {editorMode === 'CUTOUT' && (
+            {editorMode === 'CUTOUT' && brushTool !== 'GUIDED' && (
                 <div
                     ref={cursorRef}
                     style={{
@@ -273,15 +372,9 @@ export function ImageCanvas() {
             <div
                 style={{
                     width: '600px', height: '600px',
-                    // Changed to simpler checkerboard for generic transparency feel
-                    background: editorMode === 'CUTOUT' ? 'transparent' : 'white',
-                    backgroundImage: editorMode === 'CUTOUT' ?
-                        `linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%, #ccc), 
-                         linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%, #ccc)`
-                        : 'none',
-                    backgroundSize: '20px 20px',
-                    backgroundPosition: '0 0, 10px 10px', // Standard checkerboard offset
-                    backgroundColor: editorMode === 'CUTOUT' ? 'white' : 'white',
+                    // Pure white background for editing
+                    background: 'white',
+                    backgroundColor: 'white',
                     boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
                     position: 'relative', overflow: 'hidden'
                 }}
