@@ -86,94 +86,124 @@ const applyAlphaThreshold = async (base64: string, threshold: number): Promise<s
     return canvas.toDataURL('image/png');
 };
 
+// Helper to call local Python server
+const processWithServer = async (base64Img: string, task: string, instruction?: string): Promise<string> => {
+    const formData = new FormData();
+    // Convert base64 to blob
+    const res = await fetch(base64Img);
+    const blob = await res.blob();
+    formData.append('file', blob);
+    formData.append('task', task);
+    if (instruction) formData.append('instruction', instruction);
+
+    try {
+        // Since we are running in Electron or local, localhost:8000 is accessible.
+        const response = await fetch('http://localhost:8000/process', {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server responded with ${response.status}`);
+        }
+
+        const resultBlob = await response.blob();
+        // Convert to base64
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(resultBlob);
+        });
+    } catch (error) {
+        console.warn("Local server unreachable or failed, falling back to WASM", error);
+        throw error;
+    }
+};
+
 export async function processImageWithGemini(
     imageBase64: string,
     task: StudioTask,
     userInstruction?: string,
     onProgress?: (percent: number) => void
 ): Promise<string> {
-    logger.log(`[CLIENT-SIDE] Iniciando proceso local: ${task}`, { instruction: userInstruction });
+    logger.log(`[CLIENT-SIDE] Iniciando proceso: ${task}`, { instruction: userInstruction });
 
+    // TRY 1: High Quality Local Server
     try {
-        if (task === 'REMOVE_BG') {
-            if (!modelLoaded && !hasLoggedInitialization) {
-                hasLoggedInitialization = true;
-                logger.log("Cargando modelo AI local (@imgly)... Esto puede tardar la primera vez.");
-            } else if (modelLoaded) {
-                // Info for debug but less alarming
-                console.log("[API] Reusing loaded AI model.");
-            }
-            const start = Date.now();
+        if (onProgress) onProgress(10);
+        logger.log("Intentando conectar con servidor Python local (Alta Calidad)...");
+        const serverResult = await processWithServer(imageBase64, task, userInstruction || '');
+        if (onProgress) onProgress(100);
+        logger.log("¡Procesado exitoso en servidor local!");
+        return serverResult;
 
-            // Config object for progress tracking
-            const config: Config = {
-                model: 'isnet', // Use larger, more accurate model
-                progress: (key: string, current: number, total: number) => {
-                    if (key.includes('fetch')) {
-                        const percent = Math.round((current / total) * 50);
-                        if (onProgress) onProgress(percent);
-                    }
+    } catch (serverError) {
+        logger.warn("Servidor local no disponible. Usando fallback WASM...", serverError);
+
+        // FALLBACK: Browser WASM (The simplified version)
+        try {
+            if (task === 'REMOVE_BG') {
+                if (!modelLoaded && !hasLoggedInitialization) {
+                    hasLoggedInitialization = true;
+                    logger.log("Cargando modelo AI navegador (@imgly)... Esto puede tardar la primera vez.");
+                } else if (modelLoaded) {
+                    console.log("[API] Reusing loaded AI model.");
                 }
-            };
+                const start = Date.now();
 
-            // Manual simulation for inference part since imgly doesn't stream inference progress easily
-            let simProgress = 50;
-            const progressInterval = setInterval(() => {
-                simProgress += (95 - simProgress) * 0.1;
-                if (onProgress) onProgress(Math.round(simProgress));
-            }, 200);
+                const config: Config = {
+                    model: 'isnet',
+                    progress: (key: string, current: number, total: number) => {
+                        if (key.includes('fetch')) {
+                            const percent = Math.round((current / total) * 50);
+                            if (onProgress) onProgress(percent);
+                        }
+                    }
+                };
 
-            try {
-                // Simplified Pipeline: Direct AI processing
-                // We skip the "enhanceForDetection" step because it was washing out bright objects (like silver generators)
-                // making it harder for the AI to see edges.
-                logger.log("Procesando imagen con modelo isnet...");
+                let simProgress = 50;
+                const progressInterval = setInterval(() => {
+                    simProgress += (95 - simProgress) * 0.1;
+                    if (onProgress) onProgress(Math.round(simProgress));
+                }, 200);
 
-                const blob = await removeBackground(imageBase64, config);
+                try {
+                    logger.log("Procesando imagen con modelo isnet (WASM)...");
+                    const blob = await removeBackground(imageBase64, config);
+                    const finalResult = await new Promise<string>((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result as string);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(blob);
+                    });
 
-                // Convert blob to base64
-                const finalResult = await new Promise<string>((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result as string);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(blob);
-                });
+                    clearInterval(progressInterval);
+                    if (onProgress) onProgress(100);
 
-                clearInterval(progressInterval);
-                if (onProgress) onProgress(100);
+                    const duration = ((Date.now() - start) / 1000).toFixed(1);
+                    logger.log(`¡Fondo eliminado (WASM) en ${duration}s!`);
+                    modelLoaded = true;
 
-                const duration = ((Date.now() - start) / 1000).toFixed(1);
-                logger.log(`¡Fondo eliminado localmente en ${duration}s!`);
-                modelLoaded = true;
+                    return finalResult;
+                } catch (e) {
+                    clearInterval(progressInterval);
+                    throw e;
+                }
 
-                return finalResult;
-            } catch (e) {
-                clearInterval(progressInterval);
-                throw e;
+            } else if (task === 'EDIT' && userInstruction) {
+                if (userInstruction.startsWith('sensitivity')) {
+                    const val = parseFloat(userInstruction.split(':')[1]);
+                    return await applyAlphaThreshold(imageBase64, val);
+                }
+                return await applyCanvasFilter(imageBase64, userInstruction);
             }
 
-        } else if (task === 'EDIT' && userInstruction) {
-            if (userInstruction.startsWith('sensitivity')) {
-                logger.log("Aplicando limpieza de sombra...");
-                if (onProgress) onProgress(50);
-                const val = parseFloat(userInstruction.split(':')[1]);
-                // val is 0-100
-                const res = await applyAlphaThreshold(imageBase64, val);
-                if (onProgress) onProgress(100);
-                return res;
-            }
+            return imageBase64;
 
-            logger.log("Aplicando filtros con Canvas API...");
-            if (onProgress) onProgress(50);
-            const res = await applyCanvasFilter(imageBase64, userInstruction);
-            if (onProgress) onProgress(100);
-            return res;
+        } catch (error) {
+            logger.error("Error en procesamiento local", error);
+            throw error;
         }
-
-        return imageBase64;
-
-    } catch (error) {
-        logger.error("Error en procesamiento local", error);
-        throw error;
     }
 }

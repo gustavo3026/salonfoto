@@ -6,7 +6,7 @@ import io
 
 class BatchBGEngine:
     def __init__(self):
-        print("Initializing BatchBG Engine...")
+        print("Initializing BatchBG Engine V3 (Matting Pipeline)...")
         self.session = None
 
     def _get_session(self):
@@ -18,7 +18,7 @@ class BatchBGEngine:
     def process_image(self, image_bytes, task="REMOVE_BG", instruction=None):
         print(f"[Engine] Processing task: '{task}' with instruction: '{instruction}'")
         
-        # Decode input
+        # Decode input to BGR
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
         
@@ -26,9 +26,8 @@ class BatchBGEngine:
             print("[Engine] Error: Could not decode image")
             raise ValueError("Could not decode image")
 
-        # Resize if too large (protect memory)
-        # For High Quality, we can go larger, say 1500 or keep 800 but alpha matting helps detail.
-        # Let's bump to 1024 for better resolution.
+        # Resize for performance (Matting is expensive)
+        # 1500 is a good balance for quality.
         max_dim = 1500 
         h, w = img.shape[:2]
         if max(h, w) > max_dim:
@@ -36,14 +35,9 @@ class BatchBGEngine:
             new_w, new_h = int(w * scale), int(h * scale)
             print(f"[Engine] Resizing input from {w}x{h} to {new_w}x{new_h} for memory safety")
             img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            # Update image_bytes for remove_background
-            success, encoded = cv2.imencode('.png', img)
-            if success:
-                image_bytes = encoded.tobytes()
 
         if task == "REMOVE_BG":
-            # Pass (possibly resized) bytes
-            return self.remove_background(image_bytes, is_bytes=True)
+            return self.guided_matting_pipeline(img)
             
         elif task == "EDIT":
             print(f"[Engine] Applying edit: {instruction}")
@@ -61,55 +55,161 @@ class BatchBGEngine:
         print("[Engine] No matching task, returning original")
         return self._encode_result(img)
 
-    def remove_background(self, input_data, is_bytes=False):
-        print("[Engine] Starting background removal with ISNET + Alpha Matting...")
-        input_bytes = input_data
-        if not is_bytes:
-            print("[Engine] Encoding input to bytes (fallback)...")
-            success, encoded = cv2.imencode('.png', input_data)
-            input_bytes = encoded.tobytes()
+    def guided_matting_pipeline(self, img_bgr):
+        """
+        V3: Coarse-to-Fine Matting Pipeline
+        1. Coarse Mask (Encoder): u2net/isnet via rembg.
+        2. Trimap Generation: Erode (FG) vs Dilate (BG) -> Unknown Region.
+        3. Guided Filter: Refine alpha in the Unknown Region.
+        """
         
-        try:
-            # Enable Alpha Matting for 'PhotoRoom' like hair/edge detail
-            output_bytes = remove(
-                input_bytes, 
-                session=self._get_session(),
-                alpha_matting=True,
-                alpha_matting_foreground_threshold=240,
-                alpha_matting_background_threshold=10,
-                alpha_matting_erode_size=10
-            )
-            print("[Engine] rembg Inference complete.")
-        except Exception as e:
-            print(f"[Engine] Error during rembg inference: {e}")
-            raise e
-
-        # Decode for Post-Processing
-        nparr = np.frombuffer(output_bytes, np.uint8)
-        rgba = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
-        
-        if rgba is None:
-             raise ValueError("Failed to decode rembg output")
-             
-        # Extract Alpha
-        if rgba.shape[2] < 4:
-            print("[Engine] Warning: output has no alpha channel")
-            alpha = np.full(rgba.shape[:2], 255, dtype=np.uint8)
-            rgba = cv2.cvtColor(rgba, cv2.COLOR_BGR2BGRA)
+        # Prepare input for rembg
+        # If input has alpha, drop it for the detection phase
+        if img_bgr.shape[2] == 4:
+            src_bgr = img_bgr[:, :, :3]
         else:
-            alpha = rgba[:, :, 3]
+            src_bgr = img_bgr
 
-        # Cleanup stray pixels (shadow stripping logic was a bit aggressive, let's relax it since Alpha Matting handles edges)
-        # Just mild cleanup
-        # _, binary_mask = cv2.threshold(alpha, 10, 255, cv2.THRESH_BINARY)
-        # alpha_final = cv2.GaussianBlur(binary_mask, (3, 3), 0)
-        # Actually, let's trust the Alpha Matting result directly. It usually produces excellent gradients.
-        # Check if we need to remove grey background remnants? 
-        # Usually ISNET is very clean. Let's pass it through directly first.
+        # 1. Coarse Mask (Inference)
+        # Reverting CLAHE as it confused the model on shiny surfaces (black metal became white).
+        success, encoded_src = cv2.imencode('.png', src_bgr)
+        input_bytes = encoded_src.tobytes()
         
-        # return self.layout_on_white(rgba) 
-        # Wait, existing logic did some cleanup. Let's keep layout_on_white but skip the aggressive thresholding.
-        return self.layout_on_white(rgba)
+        # Run standard rembg
+        output_bytes = remove(input_bytes, session=self._get_session())
+        
+        nparr = np.frombuffer(output_bytes, np.uint8)
+        rembg_output = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+        
+        if rembg_output is None or rembg_output.shape[2] < 4:
+            print("[Engine] Warning: rembg failed to produce alpha")
+            coarse_alpha = 255 * np.ones(src_bgr.shape[:2], dtype=np.uint8)
+        else:
+            coarse_alpha = rembg_output[:, :, 3]
+
+        # REFINED STRATEGY 6: "Overshoot & Refine"
+        # Problem: The black product is getting eaten (mask is too small).
+        # Solution: 
+        # 1. Be extremely permissive with the Threshold (if AI sees > 1/255, keep it).
+        # 2. DILATE (Grow) the mask to cover the missing edges.
+        # 3. Use Guided Filter to cut back the excess based on color difference.
+        
+        # A. Extremely Low Threshold
+        # Keep everything. Even faint shadows? Yes, Matting will fix shadows later.
+        _, solid_mask = cv2.threshold(coarse_alpha, 1, 255, cv2.THRESH_BINARY)
+        
+        # B. Aggressive Hole Filling
+        # Kernel 5x5 (Reduced from 21x21).
+        # We want to fill "noise" holes, but NOT structural holes like the grille vents.
+        close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        solid_mask = cv2.morphologyEx(solid_mask, cv2.MORPH_CLOSE, close_kernel)
+        
+        # C. OVERSHOOT (Dilate)
+        # Grow the object to recover the "bitten" black edges.
+        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        solid_mask = cv2.dilate(solid_mask, dilate_kernel, iterations=2)
+        
+        # Update coarse_alpha
+        coarse_alpha = solid_mask
+
+        # 2. Trimap Generation
+        # Now we have an OVERSIZED solid block.
+        # We need the Trimap to cover the transition from Object -> Background.
+        k_size = 10
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+        
+        # Dilate -> Definite BG boundary (Outer limit)
+        dilated = cv2.dilate(coarse_alpha, kernel, iterations=1)
+        
+        # Erode -> Definite FG boundary (Inner core)
+        eroded = cv2.erode(coarse_alpha, kernel, iterations=2)
+        
+        # Trimap: Unknown region
+        unknown_mask = cv2.bitwise_xor(dilated, eroded)
+        
+        # If the unknown area is too small, just return coarse alpha (optimization)
+        if cv2.countNonZero(unknown_mask) < 100:
+             print("[Engine] Edge clean enough, skipping Guided Filter.")
+             final_alpha = coarse_alpha
+        else:
+            # 3. Guided Filter Refinement
+            # Normalize to 0-1 float
+            guide = src_bgr.astype(np.float32) / 255.0
+            src_alpha_f = coarse_alpha.astype(np.float32) / 255.0
+            
+            # Parameters for Guided Filter
+            radius = 20
+            eps = 1e-6
+            
+            refined_alpha = self.fast_guided_filter(guide, src_alpha_f, radius, eps)
+            refined_alpha = np.clip(refined_alpha * 255, 0, 255).astype(np.uint8)
+            
+            # 4. Composite: Keep Definite FG/BG, replace only Unknown
+            # Start with refined
+            final_alpha = refined_alpha
+            
+            # Force Definite FG (restore solidity)
+            # Use the eroded (Solid Core) to overwrite the center
+            np.putmask(final_alpha, eroded > 0, 255)
+            
+            # Force Definite BG
+            np.putmask(final_alpha, dilated == 0, 0)
+
+        # Merge
+        b, g, r = cv2.split(src_bgr)
+        rgba_final = cv2.merge([b, g, r, final_alpha])
+        
+        return self.layout_on_white(rgba_final)
+
+    def fast_guided_filter(self, I, p, r, eps):
+        """
+        O(N) Fast Guided Filter implementation using OpenCV boxFilter.
+        I: Guide image (normalized float)
+        p: Input image (mask) (normalized float)
+        r: Radius
+        eps: Epsilon regularization
+        """
+        # Resize for speed (Fast Guided Filter)
+        # s = 0.5 (subsampling)
+        h, w = p.shape[:2]
+        h_s, w_s = int(h/2), int(w/2)
+        I_sub = cv2.resize(I, (w_s, h_s), interpolation=cv2.INTER_NEAREST)
+        p_sub = cv2.resize(p, (w_s, h_s), interpolation=cv2.INTER_NEAREST)
+        r_sub = int(r / 2)
+
+        mean_I = cv2.boxFilter(I_sub, cv2.CV_32F, (r_sub, r_sub))
+        mean_p = cv2.boxFilter(p_sub, cv2.CV_32F, (r_sub, r_sub))
+        mean_Ip = cv2.boxFilter(I_sub * p_sub[:,:,None], cv2.CV_32F, (r_sub, r_sub)) # I is color, p is single
+        # Fix dimensions: p is (H,W), I is (H,W,3). 
+        # Actually standard GF assumes Is is grayscale or handles multi-channel guide separately.
+        # For simplicity and color-edge awareness, let's use Grayscale Guide or average covariance.
+        
+        # Color Guided Filter is complex to write from scratch in 10 lines.
+        # Let's use Grayscale Guide for stability and speed.
+        I_gray_sub = cv2.cvtColor(I_sub, cv2.COLOR_BGR2GRAY)
+        
+        mean_I = cv2.boxFilter(I_gray_sub, cv2.CV_32F, (r_sub, r_sub))
+        mean_p = cv2.boxFilter(p_sub, cv2.CV_32F, (r_sub, r_sub))
+        mean_Ip = cv2.boxFilter(I_gray_sub * p_sub, cv2.CV_32F, (r_sub, r_sub))
+        mean_II = cv2.boxFilter(I_gray_sub * I_gray_sub, cv2.CV_32F, (r_sub, r_sub))
+
+        cov_Ip = mean_Ip - mean_I * mean_p
+        var_I = mean_II - mean_I * mean_I
+
+        a = cov_Ip / (var_I + eps)
+        b = mean_p - a * mean_I
+
+        mean_a = cv2.boxFilter(a, cv2.CV_32F, (r_sub, r_sub))
+        mean_b = cv2.boxFilter(b, cv2.CV_32F, (r_sub, r_sub))
+
+        # Upsample
+        mean_a = cv2.resize(mean_a, (w, h), interpolation=cv2.INTER_LINEAR)
+        mean_b = cv2.resize(mean_b, (w, h), interpolation=cv2.INTER_LINEAR)
+        
+        # Guide needs to be gray here too for the linear apply
+        I_gray = cv2.cvtColor(I, cv2.COLOR_BGR2GRAY)
+        q = mean_a * I_gray + mean_b
+        return q
 
     def layout_on_white(self, cropped_rgba):
         # Find Bounding Box
