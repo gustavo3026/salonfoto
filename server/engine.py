@@ -11,8 +11,8 @@ class BatchBGEngine:
 
     def _get_session(self):
         if self.session is None:
-            print("Lazy loading 'u2netp' model...")
-            self.session = new_session("u2netp")
+            print("Lazy loading 'isnet-general-use' model (High Quality)...")
+            self.session = new_session("isnet-general-use")
         return self.session
 
     def process_image(self, image_bytes, task="REMOVE_BG", instruction=None):
@@ -27,7 +27,9 @@ class BatchBGEngine:
             raise ValueError("Could not decode image")
 
         # Resize if too large (protect memory)
-        max_dim = 800
+        # For High Quality, we can go larger, say 1500 or keep 800 but alpha matting helps detail.
+        # Let's bump to 1024 for better resolution.
+        max_dim = 1500 
         h, w = img.shape[:2]
         if max(h, w) > max_dim:
             scale = max_dim / max(h, w)
@@ -60,7 +62,7 @@ class BatchBGEngine:
         return self._encode_result(img)
 
     def remove_background(self, input_data, is_bytes=False):
-        print("[Engine] Starting background removal...")
+        print("[Engine] Starting background removal with ISNET + Alpha Matting...")
         input_bytes = input_data
         if not is_bytes:
             print("[Engine] Encoding input to bytes (fallback)...")
@@ -68,7 +70,15 @@ class BatchBGEngine:
             input_bytes = encoded.tobytes()
         
         try:
-            output_bytes = remove(input_bytes, session=self._get_session())
+            # Enable Alpha Matting for 'PhotoRoom' like hair/edge detail
+            output_bytes = remove(
+                input_bytes, 
+                session=self._get_session(),
+                alpha_matting=True,
+                alpha_matting_foreground_threshold=240,
+                alpha_matting_background_threshold=10,
+                alpha_matting_erode_size=10
+            )
             print("[Engine] rembg Inference complete.")
         except Exception as e:
             print(f"[Engine] Error during rembg inference: {e}")
@@ -89,15 +99,17 @@ class BatchBGEngine:
         else:
             alpha = rgba[:, :, 3]
 
-        # Shadow Stripping
-        _, binary_mask = cv2.threshold(alpha, 230, 255, cv2.THRESH_BINARY)
-        alpha_final = cv2.GaussianBlur(binary_mask, (3, 3), 0)
+        # Cleanup stray pixels (shadow stripping logic was a bit aggressive, let's relax it since Alpha Matting handles edges)
+        # Just mild cleanup
+        # _, binary_mask = cv2.threshold(alpha, 10, 255, cv2.THRESH_BINARY)
+        # alpha_final = cv2.GaussianBlur(binary_mask, (3, 3), 0)
+        # Actually, let's trust the Alpha Matting result directly. It usually produces excellent gradients.
+        # Check if we need to remove grey background remnants? 
+        # Usually ISNET is very clean. Let's pass it through directly first.
         
-        b, g, r, a_orig = cv2.split(rgba)
-        rgba_clean = cv2.merge([b, g, r, alpha_final])
-        
-        # Auto-Layout
-        return self.layout_on_white(rgba_clean)
+        # return self.layout_on_white(rgba) 
+        # Wait, existing logic did some cleanup. Let's keep layout_on_white but skip the aggressive thresholding.
+        return self.layout_on_white(rgba)
 
     def layout_on_white(self, cropped_rgba):
         # Find Bounding Box
