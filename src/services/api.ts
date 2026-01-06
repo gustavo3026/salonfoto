@@ -95,137 +95,85 @@ export async function processImageWithGemini(
     logger.log(`[CLIENT-SIDE] Iniciando proceso local: ${task}`, { instruction: userInstruction });
 
     try {
-        // Helper to enhance image for AI detection (brighten shadows)
-        const enhanceForDetection = async (base64: string): Promise<string> => {
-            const img = await loadImage(base64);
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) throw new Error("Could not get canvas context");
+        if (task === 'REMOVE_BG') {
+            if (!modelLoaded && !hasLoggedInitialization) {
+                hasLoggedInitialization = true;
+                logger.log("Cargando modelo AI local (@imgly)... Esto puede tardar la primera vez.");
+            } else if (modelLoaded) {
+                // Info for debug but less alarming
+                console.log("[API] Reusing loaded AI model.");
+            }
+            const start = Date.now();
 
-            // Apply gamma/brightness to reveal dark details
-            // Brightness 130%, Contrast 110%
-            ctx.filter = 'brightness(1.3) contrast(1.1)';
-            ctx.drawImage(img, 0, 0);
-            return canvas.toDataURL('image/png');
-        };
+            // Config object for progress tracking
+            const config: Config = {
+                model: 'isnet', // Use larger, more accurate model
+                progress: (key: string, current: number, total: number) => {
+                    if (key.includes('fetch')) {
+                        const percent = Math.round((current / total) * 50);
+                        if (onProgress) onProgress(percent);
+                    }
+                }
+            };
 
-        // Helper to apply the mask from processed image to the original
-        const applyMaskToOriginal = async (originalBase64: string, maskBase64: string): Promise<string> => {
-            const [original, mask] = await Promise.all([loadImage(originalBase64), loadImage(maskBase64)]);
-            const canvas = document.createElement('canvas');
-            canvas.width = original.width;
-            canvas.height = original.height;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) throw new Error("Could not get canvas context");
-
-            // 1. Draw the mask (which has the transparency we want)
-            ctx.drawImage(mask, 0, 0);
-
-            // 2. Set composite mode to 'source-in'
-            // This keeps the pixels of the NEXT draw only where the EXISTING pixels are opaque
-            ctx.globalCompositeOperation = 'source-in';
-
-            // 3. Draw the original image
-            // It will be "clipped" by the mask we just drew
-            ctx.drawImage(original, 0, 0);
-
-            return canvas.toDataURL('image/png');
-        };
-
-        export async function processImageWithGemini(
-            imageBase64: string,
-            task: StudioTask,
-            userInstruction?: string,
-            onProgress?: (percent: number) => void
-        ): Promise<string> {
-            logger.log(`[CLIENT-SIDE] Iniciando proceso local: ${task}`, { instruction: userInstruction });
+            // Manual simulation for inference part since imgly doesn't stream inference progress easily
+            let simProgress = 50;
+            const progressInterval = setInterval(() => {
+                simProgress += (95 - simProgress) * 0.1;
+                if (onProgress) onProgress(Math.round(simProgress));
+            }, 200);
 
             try {
-                if (task === 'REMOVE_BG') {
-                    if (!modelLoaded && !hasLoggedInitialization) {
-                        hasLoggedInitialization = true;
-                        logger.log("Cargando modelo AI local (@imgly)... Esto puede tardar la primera vez.");
-                    } else if (modelLoaded) {
-                        // Info for debug but less alarming
-                        console.log("[API] Reusing loaded AI model.");
-                    }
-                    const start = Date.now();
+                // Simplified Pipeline: Direct AI processing
+                // We skip the "enhanceForDetection" step because it was washing out bright objects (like silver generators)
+                // making it harder for the AI to see edges.
+                logger.log("Procesando imagen con modelo isnet...");
 
-                    // Config object for progress tracking
-                    const config: Config = {
-                        model: 'isnet', // Use larger, more accurate model for better shadow removal
-                        progress: (key: string, current: number, total: number) => {
-                            if (key.includes('fetch')) {
-                                const percent = Math.round((current / total) * 50);
-                                if (onProgress) onProgress(percent);
-                            }
-                        }
-                    };
+                const blob = await removeBackground(imageBase64, config);
 
-                    // Manual simulation for inference part since imgly doesn't stream inference progress easily
-                    let simProgress = 50;
-                    const progressInterval = setInterval(() => {
-                        simProgress += (95 - simProgress) * 0.1;
-                        if (onProgress) onProgress(Math.round(simProgress));
-                    }, 200);
+                // Convert blob to base64
+                const finalResult = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result as string);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
 
-                    try {
-                        // SMART CUT PIPELINE
-                        // 1. Enhance image to help AI see dark details
-                        logger.log("Mejorando imagen para detección...");
-                        const enhancedImage = await enhanceForDetection(imageBase64);
+                clearInterval(progressInterval);
+                if (onProgress) onProgress(100);
 
-                        // 2. Run AI on the ENHANCED image
-                        const blob = await removeBackground(enhancedImage, config);
+                const duration = ((Date.now() - start) / 1000).toFixed(1);
+                logger.log(`¡Fondo eliminado localmente en ${duration}s!`);
+                modelLoaded = true;
 
-                        // 3. Convert result to Base64 (this is the Mask, but with wrong colors)
-                        const maskBase64 = await new Promise<string>((resolve, reject) => {
-                            const reader = new FileReader();
-                            reader.onloadend = () => resolve(reader.result as string);
-                            reader.onerror = reject;
-                            reader.readAsDataURL(blob);
-                        });
-
-                        // 4. Apply the mask to the ORIGINAL image to get correct colors
-                        const finalResult = await applyMaskToOriginal(imageBase64, maskBase64);
-
-                        clearInterval(progressInterval);
-                        if (onProgress) onProgress(100);
-
-                        const duration = ((Date.now() - start) / 1000).toFixed(1);
-                        logger.log(`¡Fondo eliminado localmente en ${duration}s!`);
-                        modelLoaded = true;
-
-                        return finalResult;
-                    } catch (e) {
-                        clearInterval(progressInterval);
-                        throw e;
-                    }
-
-                } else if (task === 'EDIT' && userInstruction) {
-                    if (userInstruction.startsWith('sensitivity')) {
-                        logger.log("Aplicando limpieza de sombra...");
-                        if (onProgress) onProgress(50);
-                        const val = parseFloat(userInstruction.split(':')[1]);
-                        // val is 0-100
-                        const res = await applyAlphaThreshold(imageBase64, val);
-                        if (onProgress) onProgress(100);
-                        return res;
-                    }
-
-                    logger.log("Aplicando filtros con Canvas API...");
-                    if (onProgress) onProgress(50);
-                    const res = await applyCanvasFilter(imageBase64, userInstruction);
-                    if (onProgress) onProgress(100);
-                    return res;
-                }
-
-                return imageBase64;
-
-            } catch (error) {
-                logger.error("Error en procesamiento local", error);
-                throw error;
+                return finalResult;
+            } catch (e) {
+                clearInterval(progressInterval);
+                throw e;
             }
+
+        } else if (task === 'EDIT' && userInstruction) {
+            if (userInstruction.startsWith('sensitivity')) {
+                logger.log("Aplicando limpieza de sombra...");
+                if (onProgress) onProgress(50);
+                const val = parseFloat(userInstruction.split(':')[1]);
+                // val is 0-100
+                const res = await applyAlphaThreshold(imageBase64, val);
+                if (onProgress) onProgress(100);
+                return res;
+            }
+
+            logger.log("Aplicando filtros con Canvas API...");
+            if (onProgress) onProgress(50);
+            const res = await applyCanvasFilter(imageBase64, userInstruction);
+            if (onProgress) onProgress(100);
+            return res;
         }
+
+        return imageBase64;
+
+    } catch (error) {
+        logger.error("Error en procesamiento local", error);
+        throw error;
+    }
+}
